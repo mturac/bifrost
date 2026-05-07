@@ -333,9 +333,20 @@ func (p *OAuth2Provider) RemovePendingMCPClient(oauthConfigID string) error {
 	return nil
 }
 
-// InitiateOAuthFlow creates an OAuth config and returns the authorization URL
-// Supports OAuth discovery and PKCE
-func (p *OAuth2Provider) InitiateOAuthFlow(ctx context.Context, config *schemas.OAuth2Config) (*schemas.OAuth2FlowInitiation, error) {
+// PreparedOAuthFlow holds the result of PrepareOAuthFlow — all network work done,
+// nothing written to DB yet.
+type PreparedOAuthFlow struct {
+	// Record is the fully-populated oauth_config row ready to be inserted.
+	Record *tables.TableOauthConfig
+	// Initiation contains the authorization URL and metadata to return to the caller.
+	Initiation *schemas.OAuth2FlowInitiation
+}
+
+// PrepareOAuthFlow performs all network I/O (discovery, dynamic client registration, PKCE)
+// and builds the oauth_config record and flow initiation result, but does NOT write to the DB.
+// Call this before opening a DB transaction so the transaction only contains DB writes.
+// MCPClientID is optional. When set, it is stored as the FK on the oauth_config record.
+func (p *OAuth2Provider) PrepareOAuthFlow(ctx context.Context, config *schemas.OAuth2Config) (*PreparedOAuthFlow, error) {
 	// Generate state token for CSRF protection
 	state, err := generateSecureRandomString(32)
 	if err != nil {
@@ -460,32 +471,32 @@ func (p *OAuth2Provider) InitiateOAuthFlow(ctx context.Context, config *schemas.
 
 	// Create oauth_config record (using dynamically registered or user-provided client_id)
 	expiresAt := time.Now().Add(15 * time.Minute)
-	oauthConfigRecord := &tables.TableOauthConfig{
-		ID:              oauthConfigID,
-		ClientID:        schemas.NewEnvVar(clientID), // May be from dynamic registration
-		ClientSecret:    schemas.NewEnvVar(clientSecret),
-		AuthorizeURL:    authorizeURL,
-		TokenURL:        tokenURL,
-		RegistrationURL: registrationURL,
-		RedirectURI:     config.RedirectURI,
-		Scopes:          string(scopesJSON),
-		State:           state,
-		CodeVerifier:    codeVerifier,
-		CodeChallenge:   codeChallenge,
-		Status:          "pending",
-		ServerURL:       config.ServerURL,
-		UseDiscovery:    config.UseDiscovery,
-		ExpiresAt:       expiresAt,
+	var linkedMCPClientID *string
+	if config.MCPClientID != "" {
+		linkedMCPClientID = bifrost.Ptr(config.MCPClientID)
 	}
-
-	if err := p.configStore.CreateOauthConfig(ctx, oauthConfigRecord); err != nil {
-		return nil, fmt.Errorf("failed to create oauth config: %w", err)
+	oauthConfigRecord := &tables.TableOauthConfig{
+		ID:                oauthConfigID,
+		ClientID:          schemas.NewEnvVar(clientID), // May be from dynamic registration
+		ClientSecret:      schemas.NewEnvVar(clientSecret),
+		AuthorizeURL:      authorizeURL,
+		TokenURL:          tokenURL,
+		RegistrationURL:   registrationURL,
+		RedirectURI:       config.RedirectURI,
+		Scopes:            string(scopesJSON),
+		State:             state,
+		CodeVerifier:      codeVerifier,
+		CodeChallenge:     codeChallenge,
+		Status:            "pending",
+		ServerURL:         config.ServerURL,
+		UseDiscovery:      config.UseDiscovery,
+		ExpiresAt:         expiresAt,
+		ConfigMCPClientID: linkedMCPClientID,
 	}
 
 	// Resolve env var reference to actual value for use in the authorize URL.
 	// The reference ("env.MY_VAR") is stored in DB; the resolved value is sent to the provider.
 	resolvedClientID := schemas.NewEnvVar(clientID).GetValue()
-
 	// Build authorize URL with PKCE (using dynamically registered or user-provided client_id)
 	authURL := p.buildAuthorizeURLWithPKCE(
 		authorizeURL,
@@ -496,14 +507,33 @@ func (p *OAuth2Provider) InitiateOAuthFlow(ctx context.Context, config *schemas.
 		scopes,
 	)
 
-	logger.Debug("OAuth flow initiated successfully: oauth_config_id: %s, client_id: %s", oauthConfigID, resolvedClientID)
+	logger.Debug("OAuth flow prepared: oauth_config_id: %s, client_id: %s", oauthConfigID, resolvedClientID)
 
-	return &schemas.OAuth2FlowInitiation{
-		OauthConfigID: oauthConfigID,
-		AuthorizeURL:  authURL,
-		State:         state,
-		ExpiresAt:     expiresAt,
+	return &PreparedOAuthFlow{
+		Record: oauthConfigRecord,
+		Initiation: &schemas.OAuth2FlowInitiation{
+			OauthConfigID: oauthConfigID,
+			AuthorizeURL:  authURL,
+			State:         state,
+			ExpiresAt:     expiresAt,
+		},
 	}, nil
+}
+
+// InitiateOAuthFlow creates an OAuth config and returns the authorization URL.
+// It calls PrepareOAuthFlow then persists the record. Use PrepareOAuthFlow directly
+// when you need to wrap the DB insert in a larger transaction.
+func (p *OAuth2Provider) InitiateOAuthFlow(ctx context.Context, config *schemas.OAuth2Config) (*schemas.OAuth2FlowInitiation, error) {
+	prepared, err := p.PrepareOAuthFlow(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.configStore.CreateOauthConfig(ctx, prepared.Record); err != nil {
+		return nil, fmt.Errorf("failed to create oauth config: %w", err)
+	}
+
+	return prepared.Initiation, nil
 }
 
 // CompleteOAuthFlow handles the OAuth callback and exchanges code for tokens

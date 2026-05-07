@@ -415,6 +415,13 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 
 									{(authType === "oauth" || authType === "per_user_oauth") && (
 										<>
+											{/* OAuth fields are locked once the flow has been initiated */}
+											{oauthFlow && (
+												<p className="text-muted-foreground rounded-md border px-3 py-2 text-sm">
+													OAuth authorization in progress — configuration is locked until the flow completes.
+												</p>
+											)}
+
 											{/* OAuth Client ID */}
 											<FormField
 												control={control}
@@ -438,7 +445,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 															</TooltipProvider>
 														</div>
 														<FormControl>
-															<EnvVarInput value={field.value} onChange={field.onChange} placeholder="your-client-id (auto-generated if empty)" data-testid="mcp-oauth-client-id" />
+															<EnvVarInput disabled={!!oauthFlow} value={field.value} onChange={field.onChange} placeholder="your-client-id (auto-generated if empty)" data-testid="mcp-oauth-client-id" />
 														</FormControl>
 														<p className="text-muted-foreground text-xs">
 															Will be auto-generated via dynamic registration if left empty and provider supports it
@@ -456,7 +463,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 													<FormItem>
 														<FormLabel>OAuth Client Secret (optional for PKCE)</FormLabel>
 														<FormControl>
-															<EnvVarInput value={field.value} onChange={field.onChange} placeholder="your-client-secret" hideValueWhenEnv maskNonEnvValue data-testid="mcp-oauth-client-secret" />
+															<EnvVarInput disabled={!!oauthFlow} value={field.value} onChange={field.onChange} placeholder="your-client-secret" hideValueWhenEnv maskNonEnvValue data-testid="mcp-oauth-client-secret" />
 														</FormControl>
 														<p className="text-muted-foreground text-xs">Leave empty for public clients using PKCE</p>
 														<FormMessage />
@@ -474,6 +481,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 														<FormControl>
 															<Input
 																{...field}
+																disabled={!!oauthFlow}
 																value={field.value ?? ""}
 																onChange={(e) => {
 																	field.onChange(e);
@@ -499,6 +507,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 														<FormControl>
 															<Input
 																{...field}
+																disabled={!!oauthFlow}
 																value={field.value ?? ""}
 																onChange={(e) => {
 																	field.onChange(e);
@@ -523,6 +532,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 														<FormControl>
 															<Input
 																{...field}
+																disabled={!!oauthFlow}
 																value={field.value ?? ""}
 																onChange={(e) => {
 																	field.onChange(e);
@@ -542,7 +552,7 @@ const ClientForm: React.FC<ClientFormProps> = ({ open, onClose, onSaved }) => {
 											{/* Scopes (local state, not RHF field) */}
 											<div className="space-y-2">
 												<Label>Scopes (optional, comma-separated)</Label>
-												<Input value={scopesText} onChange={(e) => setScopesText(e.target.value)} placeholder="read, write, admin" />
+												<Input disabled={!!oauthFlow} value={scopesText} onChange={(e) => setScopesText(e.target.value)} placeholder="read, write, admin" />
 												<p className="text-muted-foreground text-xs">Will be discovered from server if not provided</p>
 											</div>
 										</>

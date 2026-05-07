@@ -4552,9 +4552,14 @@ func (s *RDBConfigStore) DeleteOauthConfig(ctx context.Context, id string, tx ..
 	return nil
 }
 
-// UpdateOauthConfig updates an existing OAuth config
-func (s *RDBConfigStore) UpdateOauthConfig(ctx context.Context, config *tables.TableOauthConfig) error {
-	result := s.DB().WithContext(ctx).Save(config)
+// UpdateOauthConfig updates an existing OAuth config.
+// An optional tx can be passed to run the update within an existing transaction.
+func (s *RDBConfigStore) UpdateOauthConfig(ctx context.Context, config *tables.TableOauthConfig, tx ...*gorm.DB) error {
+	db := s.DB()
+	if len(tx) > 0 && tx[0] != nil {
+		db = tx[0]
+	}
+	result := db.WithContext(ctx).Save(config)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update oauth config: %w", result.Error)
 	}
