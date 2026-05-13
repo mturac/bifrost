@@ -20,6 +20,8 @@ type TableBudget struct {
 	VirtualKeyID     *string `gorm:"type:varchar(255);index" json:"virtual_key_id,omitempty"`
 	ProviderConfigID *uint   `gorm:"index" json:"provider_config_id,omitempty"`
 
+	IsCalendarAligned bool `gorm:"-" json:"is_calendar_aligned"`
+
 	// Config hash is used to detect the changes synced from config.json file
 	// Every time we sync the config.json file, we will update the config hash
 	ConfigHash string `gorm:"type:varchar(255);null" json:"config_hash"`
@@ -30,6 +32,37 @@ type TableBudget struct {
 
 // TableName sets the table name for each model
 func (TableBudget) TableName() string { return "governance_budgets" }
+
+// AfterFind sets IsCalendarAligned from the owning entity. Calendar alignment is now
+// a property of the owner (VK or Team), not the budget row itself — so we subquery the
+// owner's calendar_aligned column at fetch time.
+func (b *TableBudget) AfterFind(tx *gorm.DB) error {
+	b.IsCalendarAligned = false
+	if tx == nil {
+		return nil
+	}
+	switch {
+	case b.VirtualKeyID != nil && *b.VirtualKeyID != "":
+		var aligned bool
+		if err := tx.Model(&TableVirtualKey{}).
+			Select("calendar_aligned").
+			Where("id = ?", *b.VirtualKeyID).
+			Scan(&aligned).Error; err != nil {
+			return err
+		}
+		b.IsCalendarAligned = aligned
+	case b.TeamID != nil && *b.TeamID != "":
+		var aligned bool
+		if err := tx.Model(&TableTeam{}).
+			Select("calendar_aligned").
+			Where("id = ?", *b.TeamID).
+			Scan(&aligned).Error; err != nil {
+			return err
+		}
+		b.IsCalendarAligned = aligned
+	}
+	return nil
+}
 
 // BeforeSave hook for Budget to validate reset duration format and max limit
 func (b *TableBudget) BeforeSave(tx *gorm.DB) error {

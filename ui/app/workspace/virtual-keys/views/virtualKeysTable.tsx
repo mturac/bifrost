@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
-import { resetDurationLabels } from "@/lib/constants/governance";
+import { resetDurationLabels, supportsCalendarAlignment } from "@/lib/constants/governance";
 import { getErrorMessage, useDeleteVirtualKeyMutation, useLazyGetVirtualKeysQuery } from "@/lib/store";
 import { Customer, Team, VirtualKey } from "@/lib/types/governance";
 import { cn } from "@/lib/utils";
@@ -100,7 +100,7 @@ function VKBudgetCell({ vk }: { vk: VirtualKey }) {
 					</span>
 					<span className="text-muted-foreground text-xs">
 						Resets {formatResetDuration(b.reset_duration)}
-						{vk.calendar_aligned && " (calendar)"}
+						{vk.calendar_aligned && supportsCalendarAlignment(b.reset_duration) && " (calendar)"}
 					</span>
 				</div>
 			))}
@@ -110,7 +110,7 @@ function VKBudgetCell({ vk }: { vk: VirtualKey }) {
 
 function VKRateLimitCell({ vk }: { vk: VirtualKey }) {
 	const { displayRateLimit } = useVirtualKeyUsage(vk);
-	return <RateLimitDisplay rateLimits={displayRateLimit} />;
+	return <RateLimitDisplay rateLimits={displayRateLimit} calendarAligned={vk.calendar_aligned} />;
 }
 
 // Status badge derives exhaustion from the same AP-backed source as the budget/rate-limit cells

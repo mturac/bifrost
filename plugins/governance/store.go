@@ -1373,14 +1373,7 @@ func (gs *LocalGovernanceStore) ResetExpiredBudgetsInMemory(ctx context.Context)
 		if !ok || budget == nil {
 			return true
 		}
-		// Find if the budget is calendar aligned on the virtualkey attached to this budget
-		calendarAligned := false
-		if budget.VirtualKeyID != nil {
-			virtualKey, ok := gs.virtualKeys.Load(*budget.VirtualKeyID)
-			if ok {
-				calendarAligned = virtualKey.(*configstoreTables.TableVirtualKey).CalendarAligned
-			}
-		}
+		calendarAligned := budget.IsCalendarAligned
 		var shouldReset bool
 		var newLastReset time.Time
 		if calendarAligned {
@@ -1454,10 +1447,9 @@ func (gs *LocalGovernanceStore) ResetExpiredRateLimitsInMemory(ctx context.Conte
 		}
 		return nil
 	}
-	// Build reverse map from rate_limit ID to the owning VK's CalendarAligned
-	// setting. Rate limits attach to either a VK (vk.RateLimitID) or a provider
-	// config (pc.RateLimitID) which itself belongs to a VK. Rate limits not
-	// reachable from any VK (e.g. team-attached) remain non-aligned.
+	// Build reverse map from rate_limit ID to the owning entity's CalendarAligned
+	// setting. Rate limits attach to a VK (vk.RateLimitID), a provider config
+	// (pc.RateLimitID, which itself belongs to a VK), or a team (team.RateLimitID).
 	rateLimitCalendarAligned := make(map[string]bool)
 	gs.virtualKeys.Range(func(_, v any) bool {
 		vk, ok := v.(*configstoreTables.TableVirtualKey)
@@ -1471,6 +1463,16 @@ func (gs *LocalGovernanceStore) ResetExpiredRateLimitsInMemory(ctx context.Conte
 			if pc := &vk.ProviderConfigs[i]; pc.RateLimitID != nil {
 				rateLimitCalendarAligned[*pc.RateLimitID] = vk.CalendarAligned
 			}
+		}
+		return true
+	})
+	gs.teams.Range(func(_, v any) bool {
+		team, ok := v.(*configstoreTables.TableTeam)
+		if !ok || team == nil {
+			return true
+		}
+		if team.RateLimitID != nil {
+			rateLimitCalendarAligned[*team.RateLimitID] = team.CalendarAligned
 		}
 		return true
 	})

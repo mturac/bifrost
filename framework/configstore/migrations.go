@@ -713,6 +713,9 @@ func triggerMigrations(ctx context.Context, db *gorm.DB) error {
 	if err := migrationDropLegacyCalendarAlignedColumns(ctx, db); err != nil {
 		return err
 	}
+	if err := migrationAddTeamCalendarAlignedColumn(ctx, db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -7555,6 +7558,37 @@ func migrationDropLegacyCalendarAlignedColumns(ctx context.Context, db *gorm.DB)
 	}})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("error running drop_legacy_calendar_aligned_columns migration: %s", err.Error())
+	}
+	return nil
+}
+
+// migrationAddTeamCalendarAlignedColumn adds calendar_aligned to governance_teams so
+// team-level calendar alignment (governing all team budgets and the team rate limit)
+// can be persisted.
+func migrationAddTeamCalendarAlignedColumn(ctx context.Context, db *gorm.DB) error {
+	m := migrator.New(db, migrator.DefaultOptions, []*migrator.Migration{{
+		ID: "add_team_calendar_aligned_column",
+		Migrate: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			mig := tx.Migrator()
+			if !mig.HasColumn(&tables.TableTeam{}, "calendar_aligned") {
+				if err := mig.AddColumn(&tables.TableTeam{}, "CalendarAligned"); err != nil {
+					return fmt.Errorf("failed to add calendar_aligned column to governance_teams: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			mig := tx.Migrator()
+			if mig.HasColumn(&tables.TableTeam{}, "calendar_aligned") {
+				return mig.DropColumn(&tables.TableTeam{}, "calendar_aligned")
+			}
+			return nil
+		},
+	}})
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("error running add_team_calendar_aligned_column migration: %s", err.Error())
 	}
 	return nil
 }
