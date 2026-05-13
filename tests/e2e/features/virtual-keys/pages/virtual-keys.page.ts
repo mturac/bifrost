@@ -40,7 +40,7 @@ function escapeRegExp(string: string): string {
  */
 export interface BudgetConfig {
   maxLimit: number
-  resetDuration?: string
+  resetDuration?: string // e.g. "1d", "1m", "1M" — see resetDurationOptions
 }
 
 /**
@@ -73,7 +73,7 @@ export interface VirtualKeyConfig {
   description?: string
   isActive?: boolean
   providerConfigs?: ProviderConfig[]
-  budget?: BudgetConfig
+  budgets?: BudgetConfig[]
   rateLimit?: RateLimitConfig
   entityType?: 'none' | 'team' | 'customer'
   teamId?: string
@@ -107,7 +107,7 @@ export class VirtualKeysPage extends BasePage {
     this.emptyState = page.getByTestId('virtual-keys-empty-state')
 
     // Virtual key sheet elements
-    this.sheet = page.getByTestId('vk-sheet')
+    this.sheet = page.getByTestId('vk-sheet-content')
     this.nameInput = page.getByTestId('vk-name-input')
     this.descriptionInput = page.getByTestId('vk-description-input')
     this.isActiveToggle = page.getByTestId('vk-is-active-toggle')
@@ -120,7 +120,7 @@ export class VirtualKeysPage extends BasePage {
    * Navigate to the virtual keys page
    */
   async goto(): Promise<void> {
-    await this.page.goto('/workspace/virtual-keys')
+    await this.page.goto('/workspace/governance/virtual-keys')
     await waitForNetworkIdle(this.page)
   }
 
@@ -188,8 +188,8 @@ export class VirtualKeysPage extends BasePage {
     }
 
     // Set budget if specified
-    if (config.budget) {
-      await this.setBudget(config.budget)
+    if (config.budgets && config.budgets.length > 0) {
+      await this.setBudgets(config.budgets)
     }
 
     // Set rate limits if specified
@@ -257,15 +257,38 @@ export class VirtualKeysPage extends BasePage {
   }
 
   /**
-   * Set budget configuration in the form
+   * Set budget lines in the MultiBudgetLines component.
+   * Clicks "Add Budget" for each entry, fills the amount input,
+   * and selects the reset period.
    */
-  private async setBudget(budget: BudgetConfig): Promise<void> {
-    // Find budget max limit input and fill (fill() clears and sets atomically)
-    const budgetInput = this.page.locator('#budgetMaxLimit')
-    await budgetInput.fill(String(budget.maxLimit))
+  private async setBudgets(budgets: BudgetConfig[]): Promise<void> {
+    for (let i = 0; i < budgets.length; i++) {
+      const budget = budgets[i]
+      // Click "Add Budget" button to add a new budget line
+      await this.page.getByTestId('vk-budget-lines-add-btn').click()
+      const amountInput = this.page.getByTestId(`vk-budget-lines-amount-${i}`)
+      await amountInput.fill(String(budget.maxLimit))
+      // Select reset period if specified
+      if (budget.resetDuration) {
+        await this.page.getByTestId(`vk-budget-lines-line-${i}`).getByRole('combobox').click()
+        await this.page.getByRole('option', { name: this.resetDurationLabel(budget.resetDuration), exact: true }).click()
+      }
+    }
+  }
 
-    // Set reset duration if specified - skip for now as default is fine
-    // The reset duration select is complex and default "Monthly" is usually correct
+  private resetDurationLabel(value: string): string {
+    const labels: Record<string, string> = {
+      '1m': 'Every Minute',
+      '5m': 'Every 5 Minutes',
+      '15m': 'Every 15 Minutes',
+      '30m': 'Every 30 Minutes',
+      '1h': 'Hourly',
+      '6h': 'Every 6 Hours',
+      '1d': 'Daily',
+      '1w': 'Weekly',
+      '1M': 'Monthly',
+    }
+    return labels[value] ?? value
   }
 
   /**
@@ -357,8 +380,8 @@ export class VirtualKeysPage extends BasePage {
       }
     }
 
-    if (updates.budget) {
-      await this.setBudget(updates.budget)
+    if (updates.budgets && updates.budgets.length > 0) {
+      await this.setBudgets(updates.budgets)
     }
 
     if (updates.rateLimit) {
