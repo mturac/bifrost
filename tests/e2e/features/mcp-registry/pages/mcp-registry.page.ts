@@ -10,7 +10,7 @@ export type MCPConnectionType = 'http' | 'sse' | 'stdio'
 /**
  * Authentication types for HTTP/SSE connections
  */
-export type MCPAuthType = 'none' | 'headers' | 'oauth'
+export type MCPAuthType = 'none' | 'headers' | 'oauth' | 'per_user_oauth'
 
 /** Header value shape used by API (value / env_var / from_env) */
 export type EnvVarLike = { value: string; env_var?: string; from_env?: boolean }
@@ -124,8 +124,12 @@ export class MCPRegistryPage extends BasePage {
   }
 
   async clientExists(name: string): Promise<boolean> {
-    await this.page.waitForTimeout(500) // Brief wait for UI update
-    return (await this.getClientRow(name).count()) > 0
+    try {
+      await expect(this.getClientRow(name)).toBeVisible({ timeout: 5000 })
+      return true
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -174,8 +178,8 @@ export class MCPRegistryPage extends BasePage {
     await expect(selectTrigger).toBeVisible({ timeout: 5000 })
     await selectTrigger.click()
 
-    // Select the option by data-testid
-    const optionTestId = `auth-type-${type}`
+    // Select the option by data-testid (per_user_oauth uses kebab-case in testid)
+    const optionTestId = `auth-type-${type.replace(/_/g, '-')}`
     const option = this.page.locator(`[data-testid="${optionTestId}"]`)
     await expect(option).toBeVisible({ timeout: 5000 })
     await option.click()
@@ -265,8 +269,8 @@ export class MCPRegistryPage extends BasePage {
         }
       }
 
-      // Handle OAuth config
-      if (config.authType === 'oauth') {
+      // Handle OAuth config (oauth and per_user_oauth share the same fields)
+      if (config.authType === 'oauth' || config.authType === 'per_user_oauth') {
         if (config.oauthClientId) {
           await this.oauthClientIdInput.fill(config.oauthClientId)
         }
