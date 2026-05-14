@@ -618,27 +618,41 @@ func TestHandleProviderRequest_OCROperationNotAllowed(t *testing.T) {
 	}
 }
 
-// Test that retryableStatusCodes are properly defined
+// Test that retryableStatusCodes are properly defined.
+// These are transient server errors — the same key is retried.
 func TestRetryableStatusCodes(t *testing.T) {
-	expectedCodes := map[int]bool{
-		500: true, // Internal Server Error
-		502: true, // Bad Gateway
-		503: true, // Service Unavailable
-		504: true, // Gateway Timeout
-		429: true, // Too Many Requests
-	}
-
-	for code, expected := range expectedCodes {
-		if retryableStatusCodes[code] != expected {
-			t.Errorf("Status code %d should be retryable=%v, got %v", code, expected, retryableStatusCodes[code])
+	expected := []int{500, 502, 503, 504}
+	for _, code := range expected {
+		if !retryableStatusCodes[code] {
+			t.Errorf("status code %d should be retryable", code)
 		}
 	}
 
-	// Test non-retryable codes
-	nonRetryableCodes := []int{200, 201, 400, 401, 403, 404, 422}
-	for _, code := range nonRetryableCodes {
+	// Codes that must NOT be in retryableStatusCodes: per-key codes (rotated, not retried-same-key),
+	// success codes, and request-bound 4xx (terminal).
+	notRetryable := []int{200, 201, 400, 401, 402, 403, 404, 422, 429}
+	for _, code := range notRetryable {
 		if retryableStatusCodes[code] {
-			t.Errorf("Status code %d should not be retryable", code)
+			t.Errorf("status code %d should not be in retryableStatusCodes", code)
+		}
+	}
+}
+
+// Test that keyRotateStatusCodes are properly defined.
+// These are per-key failures — rotate to the next key instead of retrying the same one.
+func TestKeyRotateStatusCodes(t *testing.T) {
+	expected := []int{401, 402, 403, 429}
+	for _, code := range expected {
+		if !keyRotateStatusCodes[code] {
+			t.Errorf("status code %d should trigger key rotation", code)
+		}
+	}
+
+	// Request-bound 4xx and success codes must not trigger rotation.
+	notRotate := []int{200, 201, 400, 404, 422, 500, 502, 503, 504}
+	for _, code := range notRotate {
+		if keyRotateStatusCodes[code] {
+			t.Errorf("status code %d should not be in keyRotateStatusCodes", code)
 		}
 	}
 }
@@ -1041,7 +1055,7 @@ func TestSelectKeyFromProviderForModel_SessionStickinessNoRotation(t *testing.T)
 	}
 
 	fixedKey := pool[0]
-	keyProvider := func(_ map[string]bool) (schemas.Key, error) { return fixedKey, nil }
+	keyProvider := func(_, _ map[string]bool) (schemas.Key, error) { return fixedKey, nil }
 
 	// Simulate 3 rate-limit failures then success; all attempts must use key-a.
 	var usedKeyIDs []string
@@ -1146,7 +1160,7 @@ func TestExecuteRequestWithRetries_KeyRotation(t *testing.T) {
 
 	t.Run("RotatesKeyOnRateLimitRetry", func(t *testing.T) {
 		var selectedKeyIDs []string
-		keyProvider := func(usedKeyIDs map[string]bool) (schemas.Key, error) {
+		keyProvider := func(usedKeyIDs, _ map[string]bool) (schemas.Key, error) {
 			for _, k := range keys {
 				if !usedKeyIDs[k.ID] {
 					return k, nil
@@ -1193,7 +1207,7 @@ func TestExecuteRequestWithRetries_KeyRotation(t *testing.T) {
 	t.Run("SameKeyOnNetworkError", func(t *testing.T) {
 		var selectedKeyIDs []string
 		keyProviderCalls := 0
-		keyProvider := func(usedKeyIDs map[string]bool) (schemas.Key, error) {
+		keyProvider := func(usedKeyIDs, _ map[string]bool) (schemas.Key, error) {
 			keyProviderCalls++
 			for _, k := range keys {
 				if !usedKeyIDs[k.ID] {
@@ -1243,7 +1257,7 @@ func TestExecuteRequestWithRetries_KeyRotation(t *testing.T) {
 		var selectedKeyIDs []string
 		// 3 keys, 6 retries — should cycle through all 3 keys twice
 		config6 := createTestConfig(5, 0, 0) // 5 retries = 6 total attempts
-		keyProvider := func(usedKeyIDs map[string]bool) (schemas.Key, error) {
+		keyProvider := func(usedKeyIDs, _ map[string]bool) (schemas.Key, error) {
 			available := make([]schemas.Key, 0)
 			for _, k := range keys {
 				if !usedKeyIDs[k.ID] {
